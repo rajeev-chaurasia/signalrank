@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+
+# Corpora and checkpoints, rebuilt by script/fetch and the training runs. The
+# committed measurements live in evidence/.
+/data/
+/runs/
