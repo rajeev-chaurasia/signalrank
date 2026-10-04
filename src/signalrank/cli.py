@@ -9,6 +9,8 @@ from typing import Annotated
 import typer
 
 from signalrank.corpus import CorpusSpec, build_corpus
+from signalrank.corpus.marco import load_qrels, load_queries, stream_collection
+from signalrank.mining.bm25 import BM25Index, mine_negatives, run_for
 
 app = typer.Typer(
     add_completion=False,
@@ -53,3 +55,64 @@ def build_corpus_command(
 
 if __name__ == "__main__":
     app()
+
+
+@app.command("build-bm25")
+def build_bm25_command(
+    build: Annotated[Path, typer.Option(help="Directory holding the sampled corpus.")] = Path(
+        "data/build"
+    ),
+) -> None:
+    """Index the sampled corpus for the baseline and for mining."""
+    passage_ids: list[int] = []
+    texts: list[str] = []
+    for passage_id, text in stream_collection(build / "passages.tsv"):
+        passage_ids.append(passage_id)
+        texts.append(text)
+    typer.echo(f"indexing {len(passage_ids)} passages")
+    index = BM25Index.build(passage_ids, texts)
+    out = build / "bm25"
+    out.mkdir(parents=True, exist_ok=True)
+    index.save(out)
+    typer.echo(f"saved to {out}")
+
+
+@app.command("bm25-baseline")
+def bm25_baseline_command(
+    build: Annotated[Path, typer.Option()] = Path("data/build"),
+    evidence: Annotated[Path, typer.Option()] = Path("evidence"),
+    depth: Annotated[int, typer.Option(help="Ranking depth to score.")] = 100,
+) -> None:
+    """Score BM25 on both evaluation splits, which is the baseline to beat."""
+    from signalrank.core import evaluate
+
+    index = BM25Index.load(build / "bm25")
+    evidence.mkdir(parents=True, exist_ok=True)
+    results: dict[str, object] = {}
+    for split in ("heldout", "multi"):
+        queries = load_queries(build / f"queries.{split}.tsv")
+        qrels = load_qrels(build / f"qrels.{split}.tsv")
+        run = run_for(index, queries, depth)
+        results[split] = evaluate(run, qrels).as_dict()
+        typer.echo(f"{split}: {results[split]}")
+    (evidence / "bm25.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+
+
+@app.command("mine-negatives")
+def mine_negatives_command(
+    build: Annotated[Path, typer.Option()] = Path("data/build"),
+    depth: Annotated[int, typer.Option(help="How deep to look for negatives.")] = 100,
+    per_query: Annotated[int, typer.Option(help="Negatives kept per query.")] = 8,
+) -> None:
+    """Mine hard negatives for the training queries."""
+    index = BM25Index.load(build / "bm25")
+    queries = load_queries(build / "queries.train.tsv")
+    qrels = load_qrels(build / "../raw/qrels.train.tsv")
+    mined = mine_negatives(index, queries, qrels, depth=depth, per_query=per_query)
+    out = build / "negatives.tsv"
+    with out.open("w", encoding="utf-8") as handle:
+        for query_id in sorted(mined):
+            for passage_id in mined[query_id]:
+                handle.write(f"{query_id}\t{passage_id}\n")
+    total = sum(len(v) for v in mined.values())
+    typer.echo(f"mined {total} negatives for {len(mined)} queries into {out}")
