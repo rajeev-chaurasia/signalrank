@@ -98,5 +98,6 @@ def test_a_lower_temperature_sharpens_the_penalty() -> None:
 
 def test_the_loss_carries_a_gradient() -> None:
     queries = unit([[1.0, 0.0], [0.0, 1.0]]).requires_grad_(True)
-    contrastive_loss(queries, queries.detach().clone(), None, 0.05).backward()
+    loss = contrastive_loss(queries, queries.detach().clone(), None, 0.05)
+    loss.backward()  # type: ignore[no-untyped-call]
     assert queries.grad is not None and torch.isfinite(queries.grad).all()
