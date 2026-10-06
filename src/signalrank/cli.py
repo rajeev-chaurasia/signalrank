@@ -101,13 +101,21 @@ def bm25_baseline_command(
 @app.command("mine-negatives")
 def mine_negatives_command(
     build: Annotated[Path, typer.Option()] = Path("data/build"),
+    raw: Annotated[Path, typer.Option(help="Directory holding the MS MARCO files.")] = Path(
+        "data/raw"
+    ),
     depth: Annotated[int, typer.Option(help="How deep to look for negatives.")] = 100,
     per_query: Annotated[int, typer.Option(help="Negatives kept per query.")] = 8,
 ) -> None:
-    """Mine hard negatives for the training queries."""
+    """Mine hard negatives for the training queries.
+
+    Judged against the full training qrels rather than the sampled splits, so a
+    passage this query is known to answer is excluded even when it was not
+    drawn into the corpus.
+    """
     index = BM25Index.load(build / "bm25")
     queries = load_queries(build / "queries.train.tsv")
-    qrels = load_qrels(build / "../raw/qrels.train.tsv")
+    qrels = load_qrels(raw / "qrels.train.tsv")
     mined = mine_negatives(index, queries, qrels, depth=depth, per_query=per_query)
     out = build / "negatives.tsv"
     with out.open("w", encoding="utf-8") as handle:

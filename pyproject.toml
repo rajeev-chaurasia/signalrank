@@ -62,6 +62,9 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/faiss is a directory rather than a marker because pytest imports
+# every test module while collecting, so a marker would still pull torch
+# into the faiss process and abort it. script/test.sh runs the two halves.
 
 [tool.coverage.run]
 source = ["src/signalrank"]
