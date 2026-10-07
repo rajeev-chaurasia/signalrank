@@ -10,7 +10,12 @@ import typer
 
 from signalrank.corpus import CorpusSpec, build_corpus
 from signalrank.corpus.marco import load_qrels, load_queries, stream_collection
-from signalrank.mining.bm25 import BM25Index, mine_negatives, run_for
+
+# bm25s, faiss and torch are imported inside the commands that need them, never
+# here. Each brings its own OpenMP runtime, and a process holding two of them
+# either aborts or runs an order of magnitude slower while the runtimes fight
+# over threads. Importing them at module scope would put all three in every
+# command, including the ones that touch none of them.
 
 app = typer.Typer(
     add_completion=False,
@@ -53,10 +58,6 @@ def build_corpus_command(
     typer.echo(json.dumps(report.as_dict(), indent=2))
 
 
-if __name__ == "__main__":
-    app()
-
-
 @app.command("build-bm25")
 def build_bm25_command(
     build: Annotated[Path, typer.Option(help="Directory holding the sampled corpus.")] = Path(
@@ -64,6 +65,8 @@ def build_bm25_command(
     ),
 ) -> None:
     """Index the sampled corpus for the baseline and for mining."""
+    from signalrank.mining.bm25 import BM25Index
+
     passage_ids: list[int] = []
     texts: list[str] = []
     for passage_id, text in stream_collection(build / "passages.tsv"):
@@ -85,6 +88,7 @@ def bm25_baseline_command(
 ) -> None:
     """Score BM25 on both evaluation splits, which is the baseline to beat."""
     from signalrank.core import evaluate
+    from signalrank.mining.bm25 import BM25Index, run_for
 
     index = BM25Index.load(build / "bm25")
     evidence.mkdir(parents=True, exist_ok=True)
@@ -113,6 +117,8 @@ def mine_negatives_command(
     passage this query is known to answer is excluded even when it was not
     drawn into the corpus.
     """
+    from signalrank.mining.bm25 import BM25Index, mine_negatives
+
     index = BM25Index.load(build / "bm25")
     queries = load_queries(build / "queries.train.tsv")
     qrels = load_qrels(raw / "qrels.train.tsv")
@@ -124,3 +130,75 @@ def mine_negatives_command(
                 handle.write(f"{query_id}\t{passage_id}\n")
     total = sum(len(v) for v in mined.values())
     typer.echo(f"mined {total} negatives for {len(mined)} queries into {out}")
+
+
+def _load_training_inputs(
+    build: Path,
+) -> tuple[list[tuple[int, int]], dict[int, list[int]], dict[int, str], dict[int, str]]:
+    """Read the splits, and only the passages training will actually touch.
+
+    The corpus is 1.2 million passages and training sees the positives plus
+    their mined negatives, which is a fraction of it. Loading the rest would
+    cost a few hundred megabytes while a model is on the device.
+    """
+    pairs: list[tuple[int, int]] = []
+    for line in (build / "pairs.train.tsv").read_text(encoding="utf-8").splitlines():
+        query_id, passage_id = line.split("\t")
+        pairs.append((int(query_id), int(passage_id)))
+
+    negatives: dict[int, list[int]] = {}
+    for line in (build / "negatives.tsv").read_text(encoding="utf-8").splitlines():
+        query_id, passage_id = line.split("\t")
+        negatives.setdefault(int(query_id), []).append(int(passage_id))
+
+    queries = load_queries(build / "queries.train.tsv")
+    wanted = {passage_id for _, passage_id in pairs}
+    wanted |= {passage_id for ids in negatives.values() for passage_id in ids}
+    passages = {
+        passage_id: text
+        for passage_id, text in stream_collection(build / "passages.tsv")
+        if passage_id in wanted
+    }
+    return pairs, negatives, queries, passages
+
+
+@app.command("train")
+def train_command(
+    build: Annotated[Path, typer.Option()] = Path("data/build"),
+    out: Annotated[Path, typer.Option()] = Path("runs/dual-encoder"),
+    epochs: Annotated[int, typer.Option()] = 3,
+    batch_size: Annotated[int, typer.Option()] = 32,
+    negatives_per_query: Annotated[int, typer.Option()] = 2,
+    learning_rate: Annotated[float, typer.Option()] = 2e-5,
+    max_steps: Annotated[int, typer.Option(help="Stop early, for a dry run.")] = 0,
+    seed: Annotated[int, typer.Option()] = 20261103,
+) -> None:
+    """Fine-tune the dual encoder on mined and in-batch negatives."""
+    from signalrank.models.training import TrainConfig, train_dual_encoder
+
+    pairs, negatives, queries, passages = _load_training_inputs(build)
+    typer.echo(
+        f"{len(pairs)} pairs, {len(queries)} queries, {len(passages)} passages, "
+        f"{sum(len(v) for v in negatives.values())} negatives"
+    )
+    config = TrainConfig(
+        epochs=epochs,
+        batch_size=batch_size,
+        negatives_per_query=negatives_per_query,
+        learning_rate=learning_rate,
+        max_steps=max_steps or None,
+        seed=seed,
+    )
+    report = train_dual_encoder(
+        config=config,
+        pairs=pairs,
+        negatives=negatives,
+        queries=queries,
+        passages=passages,
+        out=out,
+    )
+    typer.echo(json.dumps(report.as_dict(), indent=2))
+
+
+if __name__ == "__main__":
+    app()
