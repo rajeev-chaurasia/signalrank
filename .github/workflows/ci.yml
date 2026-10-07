@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # One OpenMP thread throughout. faiss, torch and the library behind BM25
+      # each bring their own runtime, and two of them in one process abort at
+      # the first threaded matmul. Nothing here is a timing measurement, so
+      # there is nothing to lose by pinning it.
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.12"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+
+      - run: uv sync --all-groups
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: ruby script/check_prose.rb
+      - run: uv run python -m script.check_layers
+
+      # Two invocations, for the reason in the script. Running them as one
+      # passes locally until the first machine that actually threads.
+      - run: ./script/test.sh
