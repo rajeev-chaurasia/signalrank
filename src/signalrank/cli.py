@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import typer
 
 from signalrank.corpus import CorpusSpec, build_corpus
@@ -198,6 +199,142 @@ def train_command(
         out=out,
     )
     typer.echo(json.dumps(report.as_dict(), indent=2))
+
+
+@app.command("encode")
+def encode_command(
+    model_path: Annotated[Path, typer.Option("--model", help="Checkpoint, or a base name.")],
+    build: Annotated[Path, typer.Option()] = Path("data/build"),
+    out: Annotated[Path, typer.Option()] = Path("runs/vectors"),
+    batch_size: Annotated[int, typer.Option()] = 256,
+    untrained: Annotated[
+        bool, typer.Option(help="Random weights, for the negative control.")
+    ] = False,
+) -> None:
+    """Encode the corpus and both query splits into arrays on disk.
+
+    Separate from evaluation on purpose: this loads torch, evaluation loads
+    faiss, and a process holding both aborts.
+    """
+    import torch
+    from transformers import AutoConfig, AutoModel
+
+    from signalrank.models.dual_encoder import DualEncoder
+    from signalrank.models.encode import encode_passages, encode_queries
+
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
+    model = DualEncoder(str(model_path))
+    if untrained:
+        # Same shape, no learning. A metric this scores well is not measuring
+        # the model, which is the whole reason the control exists.
+        torch.manual_seed(0)
+        config = AutoConfig.from_pretrained(str(model_path))
+        model.encoder = AutoModel.from_config(config)  # type: ignore[no-untyped-call]
+    model = model.to(device)
+    typer.echo(f"encoding on {device}")
+
+    passage_ids: list[int] = []
+    texts: list[str] = []
+    for passage_id, text in stream_collection(build / "passages.tsv"):
+        passage_ids.append(passage_id)
+        texts.append(text)
+    encode_passages(model, passage_ids, texts, out=out, device=device, batch_size=batch_size)
+    del texts
+
+    for split in ("heldout", "multi"):
+        queries = load_queries(build / f"queries.{split}.tsv")
+        ids = sorted(queries)
+        vectors = encode_queries(model, [queries[q] for q in ids], device=device)
+        np.save(out / f"queries.{split}.npy", vectors)
+        np.save(out / f"query_ids.{split}.npy", np.asarray(ids, dtype=np.int64))
+    typer.echo(f"wrote vectors to {out}")
+
+
+@app.command("evaluate")
+def evaluate_command(
+    vectors: Annotated[Path, typer.Option()] = Path("runs/vectors"),
+    build: Annotated[Path, typer.Option()] = Path("data/build"),
+    evidence: Annotated[Path, typer.Option()] = Path("evidence"),
+    label: Annotated[str, typer.Option(help="Name this run goes under.")] = "dual-encoder",
+    depth: Annotated[int, typer.Option(help="Ranking depth to score.")] = 100,
+    nlist: Annotated[int, typer.Option()] = 4096,
+    pq_bytes: Annotated[int, typer.Option(help="Bytes per compressed vector.")] = 96,
+    nprobe: Annotated[int, typer.Option()] = 32,
+    qps: Annotated[float, typer.Option(help="Arrival rate for the latency run.")] = 100.0,
+    latency_seconds: Annotated[float, typer.Option()] = 30.0,
+) -> None:
+    """Score the same model under exact and quantized search, and time the latter.
+
+    Both indexes answer the same call, so the difference between the two sets
+    of numbers is the quantization cost and nothing else. Loads faiss and never
+    torch, which is why encoding is a separate command.
+    """
+    from signalrank.core import evaluate as score
+    from signalrank.core.controls import randomised_qrels
+    from signalrank.index.dense import FlatIndex, IvfPqIndex, search_to_run
+    from signalrank.index.latency import measure
+
+    passages = np.load(vectors / "passages.npy", mmap_mode="r")
+    passage_ids = np.load(vectors / "passage_ids.npy")
+    typer.echo(f"{passages.shape[0]} passages at {passages.shape[1]} dimensions")
+
+    results: dict[str, object] = {"label": label, "corpus": int(passages.shape[0])}
+    resident = np.ascontiguousarray(passages)
+
+    flat = FlatIndex(resident, passage_ids)
+    exact_runs = {}
+    for split in ("heldout", "multi"):
+        queries = np.load(vectors / f"queries.{split}.npy")
+        ids = np.load(vectors / f"query_ids.{split}.npy").tolist()
+        qrels = load_qrels(build / f"qrels.{split}.tsv")
+        run = search_to_run(flat, ids, queries, depth)
+        exact_runs[split] = (run, qrels, queries, ids)
+        results[f"exact_{split}"] = score(run, qrels).as_dict()
+        typer.echo(f"exact {split}: {results[f'exact_{split}']}")
+
+    # The negative control, on the same code path as every number above. A
+    # harness that still finds relevance against deranged judgements is finding
+    # something that is not there.
+    run, qrels, _, _ = exact_runs["heldout"]
+    results["control_shuffled_labels"] = score(run, randomised_qrels(qrels, seed=7)).as_dict()
+    typer.echo(f"shuffled labels: {results['control_shuffled_labels']}")
+
+    quantized = IvfPqIndex(resident, passage_ids, nlist=nlist, m=pq_bytes, nbits=8)
+    quantized.nprobe = nprobe
+    results["index"] = {
+        "nlist": nlist,
+        "pq_bytes": pq_bytes,
+        "nprobe": nprobe,
+        "compression": round(passages.shape[1] * 4 / pq_bytes, 1),
+    }
+    for rerank in (1, 4, 10):
+        for split in ("heldout", "multi"):
+            _, qrels, queries, ids = exact_runs[split]
+            run = search_to_run(quantized, ids, queries, depth, rerank_depth=rerank)
+            key = f"quantized_{split}_rerank{rerank}"
+            results[key] = score(run, qrels).as_dict()
+            typer.echo(f"{key}: {results[key]}")
+
+    _, _, queries, _ = exact_runs["heldout"]
+    for rerank in (1, 10):
+        report = measure(
+            lambda q, r=rerank: quantized.search(q, depth, rerank_depth=r),
+            queries,
+            target_qps=qps,
+            seconds=latency_seconds,
+        )
+        results[f"latency_rerank{rerank}"] = report.as_dict()
+        typer.echo(f"latency rerank{rerank}: {report.as_dict()}")
+
+    evidence.mkdir(parents=True, exist_ok=True)
+    (evidence / f"{label}.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+    typer.echo(f"wrote {evidence / (label + '.json')}")
 
 
 if __name__ == "__main__":
