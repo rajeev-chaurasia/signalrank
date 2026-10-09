@@ -9,6 +9,10 @@
 #
 # No --accelerator flag: G2 machine types attach their L4 automatically, and
 # passing it conflicts.
+#
+# No service account either. The instance trains a model from files copied
+# onto it and calls no Google API, so attaching credentials would only widen
+# what a compromised spot VM could reach.
 set -euo pipefail
 
 PROJECT="${PROJECT:-medi-agent-490106}"
@@ -32,5 +36,6 @@ gcloud compute instances create "$NAME" \
   --boot-disk-auto-delete \
   --boot-disk-device-name="$NAME" \
   --metadata="install-nvidia-driver=True" \
-  --scopes=https://www.googleapis.com/auth/cloud-platform \
+  --no-service-account \
+  --no-scopes \
   --labels=purpose=signalrank

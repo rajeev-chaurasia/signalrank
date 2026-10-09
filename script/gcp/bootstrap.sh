@@ -14,7 +14,8 @@ export PATH="$HOME/.local/bin:$PATH"
 uv sync --all-groups
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 
-./data/raw/fetch.sh
+mkdir -p data/raw
+./script/fetch_corpus.sh
 tar xzf data/raw/collection.tar.gz -C data/raw
 tar xzf data/raw/queries.tar.gz -C data/raw
 
