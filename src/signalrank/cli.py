@@ -323,12 +323,11 @@ def evaluate_command(
 
     _, _, queries, _ = exact_runs["heldout"]
     for rerank in (1, 10):
-        report = measure(
-            lambda q, r=rerank: quantized.search(q, depth, rerank_depth=r),
-            queries,
-            target_qps=qps,
-            seconds=latency_seconds,
-        )
+
+        def searcher(batch: np.ndarray, rerank_depth: int = rerank) -> object:
+            return quantized.search(batch, depth, rerank_depth=rerank_depth)
+
+        report = measure(searcher, queries, target_qps=qps, seconds=latency_seconds)
         results[f"latency_rerank{rerank}"] = report.as_dict()
         typer.echo(f"latency rerank{rerank}: {report.as_dict()}")
 
