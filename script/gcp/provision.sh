@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Bring up one spot L4 for a training run.
 #
-# Three flags here are the cost control, and none of them is optional. Spot
-# instances default to STOP on termination, and a stopped instance still bills
-# its disk, so the termination action is set to DELETE. The run duration is
-# capped so a job that hangs cannot bill overnight. The boot disk is marked
-# auto-delete so nothing outlives the instance.
+# Two flags here are the cost control. The run duration is capped so a job
+# that hangs cannot bill overnight, and the boot disk is marked auto-delete
+# so nothing outlives the instance. The termination action matters only for
+# spot, where STOP would leave a stopped instance billing its disk.
 #
 # No --accelerator flag: G2 machine types attach their L4 automatically, and
 # passing it conflicts.
@@ -19,12 +18,18 @@ PROJECT="${PROJECT:-medi-agent-490106}"
 ZONE="${ZONE:-us-central1-a}"
 NAME="${NAME:-signalrank-l4}"
 MAX_RUN="${MAX_RUN:-6h}"
+# STANDARD by default, not SPOT. A spot instance running this pipeline was
+# preempted at 104 minutes and, because termination deletes it, took the
+# finished corpus and an almost complete mining run with it. Spot saves 40
+# percent of an hourly rate that is already small, and costs the whole run
+# when capacity is reclaimed. Set MODEL=SPOT to take that trade knowingly.
+MODEL="${MODEL:-STANDARD}"
 
 gcloud compute instances create "$NAME" \
   --project="$PROJECT" \
   --zone="$ZONE" \
   --machine-type=g2-standard-8 \
-  --provisioning-model=SPOT \
+  --provisioning-model="$MODEL" \
   --instance-termination-action=DELETE \
   --max-run-duration="$MAX_RUN" \
   --maintenance-policy=TERMINATE \

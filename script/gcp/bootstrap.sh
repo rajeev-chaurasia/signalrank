@@ -22,5 +22,12 @@ tar xzf data/raw/queries.tar.gz -C data/raw
 uv run signalrank build-corpus
 uv run signalrank build-bm25
 uv run signalrank bm25-baseline
-uv run signalrank mine-negatives
+# Skipped when negatives were carried in. Mining is single threaded and took
+# 55 minutes here against 10 on the laptop that produced the same corpus,
+# all of it with the GPU idle and billing.
+if [ -s data/build/negatives.tsv ]; then
+  echo "using the negatives already present: $(wc -l < data/build/negatives.tsv) lines"
+else
+  uv run signalrank mine-negatives
+fi
 echo "bootstrap complete"
