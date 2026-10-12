@@ -7,7 +7,8 @@
 set -euo pipefail
 
 PROJECT="${PROJECT:-medi-agent-490106}"
-ZONE="${ZONE:-us-central1-a}"
+# Whichever zone provisioning actually landed in.
+ZONE="${ZONE:-$(cat .gcp-zone 2>/dev/null || echo us-central1-a)}"
 NAME="${NAME:-signalrank-l4}"
 
 gcloud compute instances delete "$NAME" --project="$PROJECT" --zone="$ZONE" --quiet || true

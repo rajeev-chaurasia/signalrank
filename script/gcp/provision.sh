@@ -15,7 +15,11 @@
 set -euo pipefail
 
 PROJECT="${PROJECT:-medi-agent-490106}"
-ZONE="${ZONE:-us-central1-a}"
+# Tried in order. L4 capacity is regional and runs out: every us-central1
+# zone returned STOCKOUT for an on-demand L4 on the day this was written,
+# which is also why the earlier spot instance was reclaimed. Quota is one
+# GPU per region, so only one of these can succeed at a time anyway.
+ZONES="${ZONE:-us-central1-a us-central1-b us-central1-c us-west1-a us-west1-b us-west1-c us-east4-a us-east4-c}"
 NAME="${NAME:-signalrank-l4}"
 MAX_RUN="${MAX_RUN:-6h}"
 # STANDARD by default, not SPOT. A spot instance running this pipeline was
@@ -25,9 +29,10 @@ MAX_RUN="${MAX_RUN:-6h}"
 # when capacity is reclaimed. Set MODEL=SPOT to take that trade knowingly.
 MODEL="${MODEL:-STANDARD}"
 
-gcloud compute instances create "$NAME" \
+create_in() {
+  gcloud compute instances create "$NAME" \
   --project="$PROJECT" \
-  --zone="$ZONE" \
+  --zone="$1" \
   --machine-type=g2-standard-8 \
   --provisioning-model="$MODEL" \
   --instance-termination-action=DELETE \
@@ -44,3 +49,15 @@ gcloud compute instances create "$NAME" \
   --no-service-account \
   --no-scopes \
   --labels=purpose=signalrank
+}
+
+for zone in $ZONES; do
+  echo "trying $zone"
+  if create_in "$zone"; then
+    echo "$zone" > .gcp-zone
+    echo "running in $zone (recorded in .gcp-zone)"
+    exit 0
+  fi
+done
+echo "no zone had capacity for an L4" >&2
+exit 1
