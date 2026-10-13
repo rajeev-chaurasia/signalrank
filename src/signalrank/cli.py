@@ -275,10 +275,27 @@ def evaluate_command(
     of numbers is the quantization cost and nothing else. Loads faiss and never
     torch, which is why encoding is a separate command.
     """
+    import gzip
+
+    from signalrank.core import Run
     from signalrank.core import evaluate as score
     from signalrank.core.controls import randomised_qrels
     from signalrank.index.dense import FlatIndex, IvfPqIndex, search_to_run
     from signalrank.index.latency import measure
+
+    runs_dir = evidence / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    def keep(name: str, run: Run) -> None:
+        """Write the ranking itself, not just what it scored.
+
+        A summary cannot be checked against anything. With the ranking beside
+        it, every metric in this file can be recomputed from the judgements by
+        someone who does not trust the code that produced it.
+        """
+        with gzip.open(runs_dir / f"{label}.{name}.jsonl.gz", "wt", encoding="utf-8") as handle:
+            for query_id in sorted(run):
+                handle.write(json.dumps({"qid": query_id, "ranked": run[query_id]}) + "\n")
 
     passages = np.load(vectors / "passages.npy", mmap_mode="r")
     passage_ids = np.load(vectors / "passage_ids.npy")
@@ -295,6 +312,7 @@ def evaluate_command(
         qrels = load_qrels(build / f"qrels.{split}.tsv")
         run = search_to_run(flat, ids, queries, depth)
         exact_runs[split] = (run, qrels, queries, ids)
+        keep(f"exact_{split}", run)
         results[f"exact_{split}"] = score(run, qrels).as_dict()
         typer.echo(f"exact {split}: {results[f'exact_{split}']}")
 
@@ -318,6 +336,7 @@ def evaluate_command(
             _, qrels, queries, ids = exact_runs[split]
             run = search_to_run(quantized, ids, queries, depth, rerank_depth=rerank)
             key = f"quantized_{split}_rerank{rerank}"
+            keep(key, run)
             results[key] = score(run, qrels).as_dict()
             typer.echo(f"{key}: {results[key]}")
 
