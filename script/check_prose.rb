@@ -13,7 +13,9 @@ BANNED = {
 }.freeze
 
 # Prose only: code legitimately has a loop variable named i, never I.
-FIRST_PERSON = /(?<![\w'])(I|I'm|I've|I'd|my|me|mine|myself)(?![\w'])/
+# Hyphens count as word characters here, so that a command named
+# mine-negatives is not read as the first person singular.
+FIRST_PERSON = /(?<![\w'-])(I|I'm|I've|I'd|my|me|mine|myself)(?![\w'-])/
 
 SKIP = %r{\A(LICENSE|uv\.lock|data/|evidence/|script/check_prose\.rb)}
 
