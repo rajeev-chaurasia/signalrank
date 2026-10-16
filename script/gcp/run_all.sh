@@ -6,8 +6,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 export PATH="$HOME/.local/bin:$PATH"
 
-while pgrep -f bootstrap.sh >/dev/null; do sleep 20; done
-echo "=== bootstrap finished $(date -u +%H:%M:%S) ==="
+# No waiting on bootstrap by name. The caller chains the two with &&, and a
+# pgrep for "bootstrap.sh" also matches the parent shell whose command line
+# contains that string, so the loop that used to be here never exited and
+# left the GPU idle while it billed.
+echo "=== starting $(date -u +%H:%M:%S) ==="
 
 echo "=== training $(date -u +%H:%M:%S) ==="
 uv run signalrank train --epochs 3 --batch-size 64 --negatives-per-query 2 \
