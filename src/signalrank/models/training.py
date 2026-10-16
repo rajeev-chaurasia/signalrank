@@ -133,7 +133,18 @@ def train_dual_encoder(
 
             step += 1
             if step % config.log_every == 0 or step == 1:
-                report.losses.append({"step": step, "loss": round(loss.item(), 5)})
+                entry = {"step": step, "loss": round(loss.item(), 5)}
+                report.losses.append(entry)
+                # Printed as well as collected. The report is only written when
+                # training ends, so a run with an hour left to go was otherwise
+                # indistinguishable from a run that had hung.
+                rate = step / max(time.perf_counter() - started, 1e-9)
+                remaining = (total - step) / rate if rate else 0.0
+                print(
+                    f"step {step}/{total} loss {entry['loss']} "
+                    f"{rate:.2f} steps/s, about {remaining / 60:.0f} min left",
+                    flush=True,
+                )
         report.epochs = epoch + 1
         if config.max_steps is not None and step >= config.max_steps:
             break
