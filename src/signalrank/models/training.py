@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import random
 import time
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,6 +44,12 @@ class TrainConfig:
     max_steps: int | None = None
     seed: int = 20261103
     log_every: int = 100
+    # bfloat16 on a card that has tensor cores, which an L4 does. The first
+    # full run was left in float32 and spent 1.3 seconds a step where the
+    # arithmetic says 0.37. bfloat16 rather than float16 because it keeps
+    # float32's exponent range, so a contrastive loss over normalised
+    # vectors needs no gradient scaler and cannot silently overflow.
+    mixed_precision: bool = True
 
 
 @dataclass
@@ -52,6 +59,7 @@ class TrainReport:
     pairs: int = 0
     seconds: float = 0.0
     device: str = ""
+    precision: str = ""
     losses: list[dict[str, float]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
@@ -61,6 +69,7 @@ class TrainReport:
             "pairs": self.pairs,
             "seconds": round(self.seconds, 1),
             "device": self.device,
+            "precision": self.precision,
             "losses": self.losses,
         }
 
@@ -109,7 +118,8 @@ def train_dual_encoder(
         ),
     )
 
-    report = TrainReport(pairs=len(usable), device=str(device))
+    precision = "bfloat16" if config.mixed_precision and device.type == "cuda" else "float32"
+    report = TrainReport(pairs=len(usable), device=str(device), precision=precision)
     started = time.perf_counter()
     step = 0
 
@@ -185,6 +195,18 @@ def _negatives_for(
     return chosen
 
 
+def _autocast(config: TrainConfig, device: torch.device) -> AbstractContextManager[None]:
+    """Half precision where the hardware has tensor cores, and nowhere else.
+
+    Only CUDA is worth it. Apple's backend runs this model in float32 at much
+    the same speed either way, and turning it on there would change the
+    numerics of a local smoke run against the numbers the GPU produced.
+    """
+    if not config.mixed_precision or device.type != "cuda":
+        return nullcontext()
+    return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+
+
 def _step(
     model: DualEncoder,
     query_text: list[str],
@@ -198,7 +220,16 @@ def _step(
         encoded: Tensor = model(**batch)
         return encoded
 
-    queries = encode(query_text, MAX_QUERY_TOKENS)
-    positives = encode(positive_text, MAX_PASSAGE_TOKENS)
-    negatives = encode(negative_text, MAX_PASSAGE_TOKENS) if negative_text else None
-    return contrastive_loss(queries, positives, negatives, config.temperature)
+    with _autocast(config, device):
+        queries = encode(query_text, MAX_QUERY_TOKENS)
+        positives = encode(positive_text, MAX_PASSAGE_TOKENS)
+        negatives = encode(negative_text, MAX_PASSAGE_TOKENS) if negative_text else None
+        # The loss itself is computed in float32. The score matrix is a
+        # softmax over a few hundred columns divided by a small temperature,
+        # which is exactly where reduced precision costs accuracy for no speed.
+        return contrastive_loss(
+            queries.float(),
+            positives.float(),
+            None if negatives is None else negatives.float(),
+            config.temperature,
+        )

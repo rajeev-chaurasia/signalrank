@@ -3,7 +3,12 @@
 #
 # Two flags here are the cost control. The run duration is capped so a job
 # that hangs cannot bill overnight, and the boot disk is marked auto-delete
-# so nothing outlives the instance. The termination action matters only for
+# so nothing outlives the instance.
+#
+# Both of those have now destroyed a run. The cap is a backstop against a
+# runaway bill, not a schedule to work to, and nothing of value should live
+# only on this disk: the driver copies each artifact down as its stage
+# finishes. The termination action matters only for
 # spot, where STOP would leave a stopped instance billing its disk.
 #
 # No --accelerator flag: G2 machine types attach their L4 automatically, and
@@ -21,7 +26,7 @@ PROJECT="${PROJECT:-medi-agent-490106}"
 # GPU per region, so only one of these can succeed at a time anyway.
 ZONES="${ZONE:-us-central1-a us-central1-b us-central1-c us-west1-a us-west1-b us-west1-c us-east4-a us-east4-c}"
 NAME="${NAME:-signalrank-l4}"
-MAX_RUN="${MAX_RUN:-6h}"
+MAX_RUN="${MAX_RUN:-4h}"
 # STANDARD by default, not SPOT. A spot instance running this pipeline was
 # preempted at 104 minutes and, because termination deletes it, took the
 # finished corpus and an almost complete mining run with it. Spot saves 40
