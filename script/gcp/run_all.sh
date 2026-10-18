@@ -12,7 +12,11 @@
 # these and copies each artifact down as it appears, so a loss costs the
 # current stage rather than everything.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+# Two levels up from script/gcp, not one. One level lands in script/, where
+# every relative path below silently refers to a file that is not there, which
+# is how a run died reporting that a corpus it had just built was missing.
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT"
 export PATH="$HOME/.local/bin:$PATH"
 
 mark() { date -u +%H:%M:%S > "$ROOT/runs/.$1-done"; echo "=== $1 finished $(date -u +%H:%M:%S) ==="; }
