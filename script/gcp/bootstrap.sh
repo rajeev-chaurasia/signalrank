@@ -6,7 +6,8 @@
 # connection. The corpus is rebuilt rather than copied because the sampling is
 # seeded, so the instance produces the same 1.2 million passages the laptop did.
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT"
 
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
@@ -14,10 +15,10 @@ export PATH="$HOME/.local/bin:$PATH"
 uv sync --all-groups
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 
-mkdir -p data/raw
-./script/fetch_corpus.sh
-tar xzf data/raw/collection.tar.gz -C data/raw
-tar xzf data/raw/queries.tar.gz -C data/raw
+mkdir -p "$ROOT/data/raw"
+"$ROOT/script/fetch_corpus.sh"
+tar xzf "$ROOT"/data/raw/collection.tar.gz -C "$ROOT/data/raw"
+tar xzf "$ROOT"/data/raw/queries.tar.gz -C "$ROOT/data/raw"
 
 uv run signalrank build-corpus
 uv run signalrank build-bm25
@@ -25,8 +26,8 @@ uv run signalrank bm25-baseline
 # Skipped when negatives were carried in. Mining is single threaded and took
 # 55 minutes here against 10 on the laptop that produced the same corpus,
 # all of it with the GPU idle and billing.
-if [ -s data/build/negatives.tsv ]; then
-  echo "using the negatives already present: $(wc -l < data/build/negatives.tsv) lines"
+if [ -s "$ROOT/data/build/negatives.tsv" ]; then
+  echo "using the negatives already present: $(wc -l < "$ROOT/data/build/negatives.tsv") lines"
 else
   uv run signalrank mine-negatives
 fi
