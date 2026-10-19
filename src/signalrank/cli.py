@@ -355,5 +355,80 @@ def evaluate_command(
     typer.echo(f"wrote {evidence / (label + '.json')}")
 
 
+@app.command("sweep-nprobe")
+def sweep_nprobe_command(
+    vectors: Annotated[Path, typer.Option()] = Path("runs/vectors"),
+    build: Annotated[Path, typer.Option()] = Path("data/build"),
+    evidence: Annotated[Path, typer.Option()] = Path("evidence"),
+    label: Annotated[str, typer.Option()] = "dual-encoder",
+    depth: Annotated[int, typer.Option()] = 100,
+    nlist: Annotated[int, typer.Option()] = 4096,
+    pq_bytes: Annotated[int, typer.Option()] = 96,
+    probes: Annotated[str, typer.Option(help="Comma separated nprobe values.")] = (
+        "32,64,128,256,512"
+    ),
+    rerank: Annotated[int, typer.Option()] = 10,
+    qps: Annotated[float, typer.Option()] = 100.0,
+    latency_seconds: Annotated[float, typer.Option()] = 10.0,
+) -> None:
+    """Separate the two places the quantized index can lose a passage.
+
+    A passage can be lost because its list was never opened, or because its
+    compressed code ranked it too low to survive. Deeper reranking already
+    recovered nothing in the first run, which rules out the second for passages
+    that were fetched. Opening more lists answers the first: if recall climbs
+    toward exact search as nprobe rises, the loss is in the coarse partition and
+    not in the compression.
+    """
+    import gzip
+
+    from signalrank.core import evaluate as score
+    from signalrank.index.dense import IvfPqIndex, search_to_run
+    from signalrank.index.latency import measure
+
+    passages = np.load(vectors / "passages.npy", mmap_mode="r")
+    passage_ids = np.load(vectors / "passage_ids.npy")
+    resident = np.ascontiguousarray(passages)
+    queries = np.load(vectors / "queries.heldout.npy")
+    ids = np.load(vectors / "query_ids.heldout.npy").tolist()
+    qrels = load_qrels(build / "qrels.heldout.tsv")
+
+    # Same seed and parameters as the evaluate command, so the lists here are
+    # the lists the published quantized numbers were measured against.
+    quantized = IvfPqIndex(resident, passage_ids, nlist=nlist, m=pq_bytes, nbits=8)
+    runs_dir = evidence / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    sweep: list[dict[str, object]] = []
+    for nprobe in (int(value) for value in probes.split(",")):
+        quantized.nprobe = nprobe
+        run = search_to_run(quantized, ids, queries, depth, rerank_depth=rerank)
+        name = f"{label}.sweep_heldout_nprobe{nprobe}.jsonl.gz"
+        with gzip.open(runs_dir / name, "wt", encoding="utf-8") as handle:
+            for query_id in sorted(run):
+                handle.write(json.dumps({"qid": query_id, "ranked": run[query_id]}) + "\n")
+
+        def searcher(batch: np.ndarray) -> object:
+            return quantized.search(batch, depth, rerank_depth=rerank)
+
+        report = measure(searcher, queries, target_qps=qps, seconds=latency_seconds)
+        row: dict[str, object] = {
+            "nprobe": nprobe,
+            **score(run, qrels).as_dict(),
+            "latency": report.as_dict(),
+        }
+        sweep.append(row)
+        typer.echo(json.dumps(row))
+
+    results = {
+        "label": label,
+        "index": {"nlist": nlist, "pq_bytes": pq_bytes, "rerank_depth": rerank},
+        "sweep": sweep,
+    }
+    (evidence / f"{label}.nprobe-sweep.json").write_text(
+        json.dumps(results, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 if __name__ == "__main__":
     app()
