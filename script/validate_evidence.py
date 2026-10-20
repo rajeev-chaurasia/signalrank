@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from signalrank.core import Qrels, Run, evaluate
+from signalrank.core.controls import randomised_qrels
 from signalrank.corpus.marco import load_qrels
 
 EVIDENCE = Path("evidence")
@@ -54,17 +55,44 @@ def recompute(label: str, summary: dict[str, Any], qrels: dict[str, Qrels]) -> l
     for key, published in summary.items():
         if not isinstance(published, dict) or "recall_at_20" not in published:
             continue
-        run_path = EVIDENCE / "runs" / f"{label}.{key}.jsonl.gz"
+        # The shuffled-label control has no ranking of its own. It is the exact
+        # ranking scored against deranged judgements, so it is rebuilt that way,
+        # with the same seed the evaluate command used.
+        source = "exact_heldout" if key == "control_shuffled_labels" else key
+        run_path = EVIDENCE / "runs" / f"{label}.{source}.jsonl.gz"
         if not run_path.exists():
             problems.append(f"{label}: {key} is published with no ranking beside it")
             continue
         split = "multi" if "multi" in key else "heldout"
-        measured = evaluate(load_run(run_path), qrels[split]).as_dict()
+        judgements = qrels[split]
+        if key == "control_shuffled_labels":
+            judgements = randomised_qrels(judgements, seed=7)
+        measured = evaluate(load_run(run_path), judgements).as_dict()
         for metric, value in published.items():
             if measured.get(metric) != value:
                 problems.append(
                     f"{label}: {key}.{metric} published as {value}, "
                     f"recomputed as {measured.get(metric)}"
+                )
+    return problems
+
+
+def recompute_sweep(label: str, summary: dict[str, Any], qrels: dict[str, Qrels]) -> list[str]:
+    """The nprobe sweep keeps its rows in a list, which the loop above skips."""
+    problems = []
+    base = label.removesuffix(".nprobe-sweep")
+    for row in summary["sweep"]:
+        nprobe = row["nprobe"]
+        run_path = EVIDENCE / "runs" / f"{base}.sweep_heldout_nprobe{nprobe}.jsonl.gz"
+        if not run_path.exists():
+            problems.append(f"{label}: nprobe {nprobe} is published with no ranking beside it")
+            continue
+        measured = evaluate(load_run(run_path), qrels["heldout"]).as_dict()
+        for metric, value in measured.items():
+            if row.get(metric) != value:
+                problems.append(
+                    f"{label}: nprobe {nprobe} {metric} published as {row.get(metric)}, "
+                    f"recomputed as {value}"
                 )
     return problems
 
@@ -126,6 +154,26 @@ def check_ordering(label: str, summary: dict[str, Any]) -> list[str]:
     return problems
 
 
+def check_sweep_ordering(found: dict[str, dict[str, Any]]) -> list[str]:
+    """Opening more lists can approach exact search but never pass it."""
+    problems = []
+    for label, summary in found.items():
+        if "sweep" not in summary:
+            continue
+        base = found.get(label.removesuffix(".nprobe-sweep"), {})
+        exact = base.get("exact_heldout", {}).get("recall_at_20")
+        if exact is None:
+            problems.append(f"{label}: no exact search to compare the sweep against")
+            continue
+        for row in summary["sweep"]:
+            if row["recall_at_20"] > exact + 1e-9:
+                problems.append(
+                    f"{label}: nprobe {row['nprobe']} scored {row['recall_at_20']}, above "
+                    f"exact search at {exact}"
+                )
+    return problems
+
+
 def main() -> int:
     if not EVIDENCE.exists() or not summaries():
         print("no evidence to validate", file=sys.stderr)
@@ -135,11 +183,14 @@ def main() -> int:
     problems = check_controls(found)
     for label, summary in found.items():
         problems += check_ordering(label, summary)
+    problems += check_sweep_ordering(found)
 
     if (BUILD / "qrels.heldout.tsv").exists():
         qrels = {split: load_qrels(BUILD / f"qrels.{split}.tsv") for split in ("heldout", "multi")}
         for label, summary in found.items():
-            if label != "bm25":
+            if "sweep" in summary:
+                problems += recompute_sweep(label, summary, qrels)
+            elif label != "bm25":
                 problems += recompute(label, summary, qrels)
         print(f"recomputed every metric over {len(found)} run(s)")
     else:
