@@ -1,0 +1,102 @@
+{
+  "label": "dual-encoder",
+  "corpus": 1200000,
+  "exact_heldout": {
+    "queries_scored": 3000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.72961,
+    "recall_at_100": 0.86467,
+    "ndcg_at_10": 0.47662,
+    "mrr_at_10": 0.4259
+  },
+  "exact_multi": {
+    "queries_scored": 2000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.58573,
+    "recall_at_100": 0.76997,
+    "ndcg_at_10": 0.38639,
+    "mrr_at_10": 0.42466
+  },
+  "control_shuffled_labels": {
+    "queries_scored": 3000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.0,
+    "recall_at_100": 0.0,
+    "ndcg_at_10": 0.0,
+    "mrr_at_10": 0.0
+  },
+  "index": {
+    "nlist": 4096,
+    "pq_bytes": 96,
+    "nprobe": 32,
+    "compression": 32.0
+  },
+  "quantized_heldout_rerank1": {
+    "queries_scored": 3000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.60222,
+    "recall_at_100": 0.72458,
+    "ndcg_at_10": 0.383,
+    "mrr_at_10": 0.33983
+  },
+  "quantized_multi_rerank1": {
+    "queries_scored": 2000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.48999,
+    "recall_at_100": 0.66133,
+    "ndcg_at_10": 0.32197,
+    "mrr_at_10": 0.36665
+  },
+  "quantized_heldout_rerank4": {
+    "queries_scored": 3000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.63628,
+    "recall_at_100": 0.74042,
+    "ndcg_at_10": 0.42419,
+    "mrr_at_10": 0.38242
+  },
+  "quantized_multi_rerank4": {
+    "queries_scored": 2000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.52883,
+    "recall_at_100": 0.68557,
+    "ndcg_at_10": 0.35617,
+    "mrr_at_10": 0.40205
+  },
+  "quantized_heldout_rerank10": {
+    "queries_scored": 3000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.63678,
+    "recall_at_100": 0.74158,
+    "ndcg_at_10": 0.42428,
+    "mrr_at_10": 0.38245
+  },
+  "quantized_multi_rerank10": {
+    "queries_scored": 2000,
+    "queries_unscorable": 0,
+    "recall_at_20": 0.52883,
+    "recall_at_100": 0.68799,
+    "ndcg_at_10": 0.35617,
+    "mrr_at_10": 0.40205
+  },
+  "latency_rerank1": {
+    "queries": 3000,
+    "target_qps": 100.0,
+    "achieved_qps": 100.0,
+    "seconds": 29.99,
+    "p50_ms": 2.132,
+    "p95_ms": 2.409,
+    "p99_ms": 2.522,
+    "max_ms": 2.796
+  },
+  "latency_rerank10": {
+    "queries": 3000,
+    "target_qps": 100.0,
+    "achieved_qps": 100.0,
+    "seconds": 29.99,
+    "p50_ms": 3.429,
+    "p95_ms": 3.751,
+    "p99_ms": 3.921,
+    "max_ms": 9.15
+  }
+}
