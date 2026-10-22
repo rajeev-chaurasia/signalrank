@@ -97,6 +97,35 @@ def recompute_sweep(label: str, summary: dict[str, Any], qrels: dict[str, Qrels]
     return problems
 
 
+def check_sweep_matches_published(found: dict[str, dict[str, Any]]) -> list[str]:
+    """The sweep must reproduce the published row at the published setting.
+
+    It rebuilds the quantized index rather than reusing the one that produced
+    the main results. If the row at the same nprobe and rerank depth does not
+    match exactly, the sweep searched a different index, and what it says about
+    the published gap is about something else.
+    """
+    problems = []
+    for label, summary in found.items():
+        if "sweep" not in summary:
+            continue
+        base = found.get(label.removesuffix(".nprobe-sweep"), {})
+        nprobe = base.get("index", {}).get("nprobe")
+        rerank = summary["index"]["rerank_depth"]
+        published = base.get(f"quantized_heldout_rerank{rerank}")
+        row = next((r for r in summary["sweep"] if r["nprobe"] == nprobe), None)
+        if published is None or row is None:
+            problems.append(f"{label}: no row at the published nprobe {nprobe} to compare")
+            continue
+        for metric, value in published.items():
+            if row.get(metric) != value:
+                problems.append(
+                    f"{label}: at nprobe {nprobe} {metric} is {row.get(metric)}, but the "
+                    f"published index scored {value}"
+                )
+    return problems
+
+
 def check_controls(found: dict[str, dict[str, Any]]) -> list[str]:
     """The controls are what make the headline numbers mean anything."""
     problems = []
@@ -184,6 +213,7 @@ def main() -> int:
     for label, summary in found.items():
         problems += check_ordering(label, summary)
     problems += check_sweep_ordering(found)
+    problems += check_sweep_matches_published(found)
 
     if (BUILD / "qrels.heldout.tsv").exists():
         qrels = {split: load_qrels(BUILD / f"qrels.{split}.tsv") for split in ("heldout", "multi")}

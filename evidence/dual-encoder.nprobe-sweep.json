@@ -1,0 +1,105 @@
+{
+  "label": "dual-encoder",
+  "index": {
+    "nlist": 4096,
+    "pq_bytes": 96,
+    "rerank_depth": 10
+  },
+  "sweep": [
+    {
+      "nprobe": 32,
+      "queries_scored": 3000,
+      "queries_unscorable": 0,
+      "recall_at_20": 0.63678,
+      "recall_at_100": 0.74158,
+      "ndcg_at_10": 0.42428,
+      "mrr_at_10": 0.38245,
+      "latency": {
+        "queries": 1000,
+        "target_qps": 100.0,
+        "achieved_qps": 100.1,
+        "seconds": 9.99,
+        "p50_ms": 3.21,
+        "p95_ms": 8.888,
+        "p99_ms": 13.976,
+        "max_ms": 17.982
+      }
+    },
+    {
+      "nprobe": 64,
+      "queries_scored": 3000,
+      "queries_unscorable": 0,
+      "recall_at_20": 0.676,
+      "recall_at_100": 0.79097,
+      "ndcg_at_10": 0.44649,
+      "mrr_at_10": 0.40067,
+      "latency": {
+        "queries": 1000,
+        "target_qps": 100.0,
+        "achieved_qps": 100.1,
+        "seconds": 9.99,
+        "p50_ms": 4.025,
+        "p95_ms": 4.835,
+        "p99_ms": 13.691,
+        "max_ms": 14.677
+      }
+    },
+    {
+      "nprobe": 128,
+      "queries_scored": 3000,
+      "queries_unscorable": 0,
+      "recall_at_20": 0.69978,
+      "recall_at_100": 0.82183,
+      "ndcg_at_10": 0.4596,
+      "mrr_at_10": 0.41166,
+      "latency": {
+        "queries": 1000,
+        "target_qps": 100.0,
+        "achieved_qps": 100.0,
+        "seconds": 10.0,
+        "p50_ms": 5.899,
+        "p95_ms": 13.193,
+        "p99_ms": 15.416,
+        "max_ms": 19.187
+      }
+    },
+    {
+      "nprobe": 256,
+      "queries_scored": 3000,
+      "queries_unscorable": 0,
+      "recall_at_20": 0.70928,
+      "recall_at_100": 0.83444,
+      "ndcg_at_10": 0.46436,
+      "mrr_at_10": 0.41549,
+      "latency": {
+        "queries": 1000,
+        "target_qps": 100.0,
+        "achieved_qps": 100.0,
+        "seconds": 10.0,
+        "p50_ms": 10.085,
+        "p95_ms": 18.918,
+        "p99_ms": 25.839,
+        "max_ms": 26.911
+      }
+    },
+    {
+      "nprobe": 512,
+      "queries_scored": 3000,
+      "queries_unscorable": 0,
+      "recall_at_20": 0.71928,
+      "recall_at_100": 0.84683,
+      "ndcg_at_10": 0.4716,
+      "mrr_at_10": 0.42188,
+      "latency": {
+        "queries": 1000,
+        "target_qps": 100.0,
+        "achieved_qps": 99.8,
+        "seconds": 10.02,
+        "p50_ms": 36.632,
+        "p95_ms": 51.657,
+        "p99_ms": 63.832,
+        "max_ms": 73.65
+      }
+    }
+  ]
+}
