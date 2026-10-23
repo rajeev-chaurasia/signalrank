@@ -36,3 +36,10 @@ jobs:
       # Two invocations, for the reason in the script. Running them as one
       # passes locally until the first machine that actually threads.
       - run: ./script/test.sh
+
+      # The judgements cannot be committed, so here this runs the structural
+      # checks only: the controls failed as controls must, quantized search
+      # never beats the exact search it approximates, and the sweep reproduces
+      # the published row. With the corpus built locally it recomputes every
+      # metric from the committed rankings as well.
+      - run: uv run python -m script.validate_evidence
