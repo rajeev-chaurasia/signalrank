@@ -17,7 +17,7 @@ whether the system answers a person that fast.
 
 The corpus is 1.2 million passages sampled from 8.8 million, and the sample is
 built to contain every passage judged relevant for an evaluated query. That
-removes about seven in eight of the distractors a query would face in the full
+removes about six in seven of the distractors a query would face in the full
 collection, so every recall number here is higher than the same model would
 score against all of it. The numbers compare systems against each other on the
 same sample and say nothing about where they would land on a leaderboard.

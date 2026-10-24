@@ -119,6 +119,95 @@ The validator also refuses a run where the quantized index scores above exact
 search. Both read the same vectors, so that cannot happen, and if it does the
 published gap is measuring a bug rather than the cost of compression.
 
+## Results
+
+One training run of `distilbert-base-uncased`, two epochs over 160,000 query
+and passage pairs with two mined negatives each, 5,000 steps in 36 minutes on
+one L4 in bfloat16. Evaluated on 3,000 held-out queries and the 2,000-query
+multi-intent subset, over the 1.2 million passage sample. The quantized index
+is IVF-PQ with 4,096 lists and 96 bytes a vector, thirty-two times smaller than
+float32, opening 32 lists a query as committed.
+
+Every metric below is recomputed by
+[`script/validate_evidence.py`](script/validate_evidence.py) from the rankings
+committed under `evidence/runs/`, given the judgements, which MS MARCO's terms
+keep out of the repository. CI runs the checks that need no judgements.
+
+### The claim
+
+| threshold, fixed in PLAN.md before the run | committed | measured | |
+| --- | ---: | ---: | --- |
+| BM25 Recall@20, the baseline | reported | 0.6518 | |
+| dual encoder Recall@20, exact search | at least 0.85 | **0.7296** | missed |
+| Recall@20 lost to IVF-PQ against exact search | at most 0.03 | **0.0928** | missed |
+| NDCG@10 gain from reranking and distillation | at least 0.08 | **+0.0454** | missed |
+| IVF-PQ p95 latency at 100 queries a second | at most 190 ms | **3.75 ms** | held |
+| training pairs | 160,000 | 160,000 | held |
+| shuffled-label Recall@20 | at most 0.01 | **0.0000** | held |
+| untrained encoder Recall@20 | at most 0.05 | **0.0082** | held |
+
+The claim does not hold, and the way it fails is the one it was written to
+catch. Under exact search the dual encoder beats BM25 by 7.8 points of
+Recall@20. Under the quantized index it would actually be served from, as
+configured before the run, it scores 0.6368, which is below BM25. The gain was
+real in the measurement and gone in the system.
+
+### Exact against quantized
+
+| held-out queries | Recall@20 | Recall@100 | NDCG@10 | MRR@10 |
+| --- | ---: | ---: | ---: | ---: |
+| BM25 | 0.6518 | 0.7868 | 0.4171 | 0.3704 |
+| dual encoder, exact | **0.7296** | **0.8647** | **0.4766** | **0.4259** |
+| dual encoder, IVF-PQ, no rerank | 0.6022 | 0.7246 | 0.3830 | 0.3398 |
+| dual encoder, IVF-PQ, rerank 4x | 0.6363 | 0.7404 | 0.4242 | 0.3824 |
+| dual encoder, IVF-PQ, rerank 10x | 0.6368 | 0.7416 | 0.4243 | 0.3825 |
+
+| multi-intent queries | Recall@20 | NDCG@10 |
+| --- | ---: | ---: |
+| BM25 | 0.5130 | 0.3410 |
+| dual encoder, exact | **0.5857** | **0.3864** |
+| dual encoder, IVF-PQ, rerank 10x | 0.5288 | 0.3562 |
+
+Reranking four times as many candidates against full-precision vectors buys
+back 3.4 points. Reranking ten times as many buys back nothing more. That is
+the clue to where the loss is: deeper reranking can only rescue a passage the
+index returned, so whatever is still missing was never returned at all.
+
+### Tracing the quantization loss
+
+The index cuts the corpus into 4,096 lists and opens 32 of them a query, under
+one percent. A relevant passage filed in a list that is not opened cannot be
+found however its compressed code scores. So the sweep below rebuilds the same
+index, holds the rerank at ten times, and opens more lists. It was run after the
+miss above, to explain it, and its row at 32 reproduces the published numbers
+exactly, which the validator requires.
+
+| lists opened | Recall@20 | lost against exact | Recall@100 | p95 latency |
+| ---: | ---: | ---: | ---: | ---: |
+| 32 | 0.6368 | 0.0928 | 0.7416 | 8.9 ms |
+| 64 | 0.6760 | 0.0536 | 0.7910 | 4.8 ms |
+| 128 | 0.6998 | **0.0298** | 0.8218 | 13.2 ms |
+| 256 | 0.7093 | 0.0203 | 0.8344 | 18.9 ms |
+| 512 | 0.7193 | 0.0103 | 0.8468 | 51.7 ms |
+
+Recall climbs toward exact search as lists are opened, and the loss falls by
+nine tenths by 512. The cost was in the coarse partition, not in the
+compression. At 128 lists the loss is inside the committed 0.03, at a p95 well
+under the latency budget. That setting was chosen after seeing the result, so
+it is published as what the sweep found and not counted as the threshold being
+met.
+
+The latency column comes from ten-second windows and is noisy: the same setting
+measured 3.75 ms over thirty seconds in the main run and 8.9 ms here, where it
+ran first, straight after the index was built. Read it for its trend.
+
+### The controls
+
+The shuffled-label control scores exactly zero, and the untrained encoder
+scores 0.0082 against the 0.05 ceiling, so the metric is not rewarding
+something other than a trained model. BM25 at 0.6518 is well clear of the 0.30
+floor, so beating it would have meant something.
+
 ## Reproducing it
 
 The corpus is not committed. MS MARCO is released for non-commercial research
