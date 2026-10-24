@@ -76,6 +76,7 @@ the plan said what it would measure and it was not measured.
 ## Latency was measured on the instance, not locally
 
 The plan says the latency threshold is measured locally. It was measured on the
-GPU instance's eight CPU cores, after training, because the laptop could not
-hold the vectors in memory while doing anything else. The search runs on CPU
-either way, but the machine is not the one the plan named.
+GPU instance's eight CPU cores, as the stage after training in the same
+pipeline, rather than after copying 3.7 GB of vectors back to a laptop whose
+memory training had already exhausted once. The search runs on CPU either way,
+but the machine is not the one the plan named.
